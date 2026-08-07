@@ -59,16 +59,31 @@ def letterbox(
 
 
 def _remover_padding(
-    mascara: np.ndarray, razao: float, pad: tuple[float, float], forma_alvo: tuple[int, int]
+    mapa: np.ndarray,
+    pad: tuple[float, float],
+    forma_entrada: tuple[int, int],
+    forma_alvo: tuple[int, int],
+    interpolacao: int = cv2.INTER_LINEAR,
 ) -> np.ndarray:
-    """Desfaz o letterbox: recorta o padding e volta à resolução original."""
-    h, w = mascara.shape[:2]
+    """Desfaz o letterbox: recorta o padding e volta à resolução original.
+
+    Algumas cabeças da rede devolvem mapas em resolução reduzida em relação à
+    entrada; nesse caso o mapa é primeiro trazido de volta ao tamanho da
+    imagem letterboxed, para que o recorte do padding seja válido.
+    """
+    if mapa.shape[:2] != forma_entrada:
+        mapa = cv2.resize(
+            mapa, (forma_entrada[1], forma_entrada[0]), interpolation=interpolacao
+        )
+
+    h, w = mapa.shape[:2]
     dw, dh = pad
     topo, esq = int(round(dh - 0.1)), int(round(dw - 0.1))
     base, dir_ = h - int(round(dh + 0.1)), w - int(round(dw + 0.1))
-    recorte = mascara[topo:base, esq:dir_]
+    recorte = mapa[topo:base, esq:dir_]
+
     return cv2.resize(
-        recorte, (forma_alvo[1], forma_alvo[0]), interpolation=cv2.INTER_NEAREST
+        recorte, (forma_alvo[1], forma_alvo[0]), interpolation=interpolacao
     )
 
 
@@ -172,8 +187,9 @@ def segmentar(
         faixa = torch.softmax(faixa, dim=1)[:, 1:2]
     faixa = faixa[0, 0].cpu().numpy()
 
-    area = (_remover_padding(area, razao, pad, forma_original) > limiar_area)
-    faixa = (_remover_padding(faixa, razao, pad, forma_original) > limiar_faixas)
+    forma_entrada = img.shape[:2]
+    area = _remover_padding(area, pad, forma_entrada, forma_original) > limiar_area
+    faixa = _remover_padding(faixa, pad, forma_entrada, forma_original) > limiar_faixas
 
     resultado = ResultadoSegmentacao(
         area_dirigivel=(area.astype(np.uint8) * 255),

@@ -33,6 +33,18 @@ def _raiz_padrao() -> Path:
     return Path(__file__).resolve().parent.parent
 
 
+# Offsets já calibrados, em segundos, por percurso.
+#
+# Obtidos com `render.painel_offsets`: o valor correto é aquele em que a rota
+# projetada acompanha o asfalto visível. Registre aqui cada percurso novo em
+# vez de repetir o número solto pelos notebooks.
+OFFSETS_CALIBRADOS: dict[str, float] = {
+    # frame 692: a rota dobra à direita junto com a via, e o GPS concorda —
+    # 12 km/h e heading girando de 342° para 310°, o carro entrando na curva.
+    "volta_menor": 2.0,
+}
+
+
 @dataclass
 class Config:
     # ------------------------------------------------------------------
@@ -51,11 +63,15 @@ class Config:
     frame_alvo: int = 692
     """Índice do frame do vídeo a ser processado."""
 
-    offset_sync_s: float = -4.0
+    offset_sync_s: float | None = None
     """Deslocamento temporal (s) entre o relógio do GPX e o t=0 do vídeo.
 
     ``t_video = (t_gpx - t_gpx[0]) + offset_sync_s``
     Valor negativo = o GPX começou a gravar ANTES do vídeo.
+
+    Deixando ``None``, usa o valor calibrado para o percurso
+    (``OFFSETS_CALIBRADOS``); se o percurso não estiver na tabela, cai em 0.0
+    e o offset precisa ser calibrado — veja ``render.painel_offsets``.
     """
 
     horizonte_s: float = 12.0
@@ -120,6 +136,8 @@ class Config:
 
     def __post_init__(self) -> None:
         self.raiz = Path(self.raiz)
+        if self.offset_sync_s is None:
+            self.offset_sync_s = OFFSETS_CALIBRADOS.get(self.nome_percurso, 0.0)
         if self.saida is None:
             self.saida = self.raiz / "output" / self.nome_percurso
         if self.pesos_yolop is None:
@@ -158,7 +176,8 @@ class Config:
             "Configuração do experimento",
             f"  percurso ............ {self.nome_percurso}",
             f"  frame alvo .......... {self.frame_alvo}",
-            f"  offset de sync ...... {self.offset_sync_s:+.2f} s",
+            f"  offset de sync ...... {self.offset_sync_s:+.2f} s"
+            + ("  (calibrado)" if self.nome_percurso in OFFSETS_CALIBRADOS else "  (NÃO calibrado)"),
             f"  horizonte ........... {self.horizonte_s:.1f} s / {self.distancia_max_m:.0f} m",
             f"  altura da câmera .... {self.altura_camera_m:.2f} m",
             f"  pitch / yaw / roll .. {self.pitch_deg:+.1f}° / {self.yaw_deg:+.1f}° / {self.roll_deg:+.1f}°",

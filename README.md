@@ -99,11 +99,25 @@ from modulos.config import Config
 from modulos import pipeline
 
 cfg = Config(nome_percurso="volta_menor", frame_alvo=692,
-             offset_sync_s=-4.0, altura_camera_m=1.50, pitch_deg=-10.0)
+             altura_camera_m=1.50, pitch_deg=-10.0)
 
 resultado = pipeline.executar(cfg)
 resultado.salvar()
 ```
+
+### Offset de sincronização
+
+O parâmetro mais sensível do pipeline: a 30 km/h, um erro de 2 s desloca o
+carro em ~17 m e a rota projetada passa a descrever uma curva que ainda vai
+acontecer. Os valores já calibrados ficam em `modulos/config.py`:
+
+```python
+OFFSETS_CALIBRADOS = {"volta_menor": 2.0}
+```
+
+`Config` usa a tabela automaticamente. Para calibrar um percurso novo, use
+`render.painel_offsets` — o offset certo é aquele em que a rota acompanha o
+asfalto visível — e registre o valor ali.
 
 ## Calibrando a pose da câmera
 

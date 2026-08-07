@@ -1,0 +1,45 @@
+# ----------------------------------------------------------------------
+# Dados brutos e pesos — grandes demais para o Git.
+# Ver README para instruções de download / geração.
+# ----------------------------------------------------------------------
+data/*.mp4
+data/*.mov
+data/*.MOV
+data/*.kmz
+YOLOPv2/data/weights/*.pt
+camera_calibration/imagens_calibracao/
+*.pt
+*.pth
+*.onnx
+*.engine
+
+# artigos de referência (direitos autorais / tamanho)
+*.pdf
+
+# saídas do pipeline
+output/
+output_yolop_frame/
+runs/
+
+# ----------------------------------------------------------------------
+# Python
+# ----------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ipynb_checkpoints/
+.venv/
+venv/
+env/
+camera_venv/
+*/camera_venv/
+
+# ----------------------------------------------------------------------
+# Sistema / editores
+# ----------------------------------------------------------------------
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/

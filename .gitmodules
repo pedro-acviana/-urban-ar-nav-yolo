@@ -1,0 +1,15 @@
+[submodule "YOLOPv2"]
+	path = YOLOPv2
+	url = https://github.com/CAIC-AD/YOLOPv2.git
+[submodule "HybridNets"]
+	path = HybridNets
+	url = https://github.com/datvuthanh/HybridNets.git
+[submodule "deepdrive"]
+	path = deepdrive
+	url = https://github.com/deepdrive/deepdrive.git
+[submodule "sumo"]
+	path = sumo
+	url = https://github.com/eclipse-sumo/sumo.git
+[submodule "Autonomous-Car-Simulation-with-Genetic-Algorithm"]
+	path = Autonomous-Car-Simulation-with-Genetic-Algorithm
+	url = https://github.com/gopipm/Autonomous-Car-Simulation-with-Genetic-Algorithm.git

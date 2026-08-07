@@ -1,0 +1,23 @@
+# Pipeline de navegação AR — dependências
+#
+#   pip install -r requirements.txt
+#
+# Para GPU, instale o torch pelo índice oficial antes deste arquivo:
+#   pip install torch --index-url https://download.pytorch.org/whl/cu121
+
+numpy>=1.24
+pandas>=2.0
+scipy>=1.10
+opencv-python>=4.8
+matplotlib>=3.7
+
+# GPS
+gpxpy>=1.6
+pyproj>=3.6
+
+# segmentação (YOLOPv2 é TorchScript: torchvision não é obrigatório)
+torch>=2.0
+
+# notebook
+jupyterlab>=4.0
+ipykernel>=6.25

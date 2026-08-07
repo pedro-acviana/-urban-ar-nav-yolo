@@ -248,8 +248,8 @@ def linha_do_horizonte(intr: Intrinsecos, pose: PoseCamera) -> float:
     pitch: se o horizonte cair fora da imagem, o ângulo está exagerado.
     """
     # direção "frente" do veículo vista pela câmera (ponto no infinito)
-    d = pose.R @ np.array([[1.0], [0.0], [0.0]])
-    if abs(float(d[2])) < 1e-9:
+    d = pose.R @ np.array([1.0, 0.0, 0.0])
+    if abs(d[2]) < 1e-9:
         return float("inf")
     p = intr.K @ d
     return float(p[1] / p[2])

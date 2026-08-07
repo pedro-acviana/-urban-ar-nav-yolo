@@ -169,24 +169,54 @@ def ocluido_por_obstaculo(
     return ocluido
 
 
+def espacamento_medio(pontos_veiculo: np.ndarray) -> float:
+    """Distância mediana entre waypoints consecutivos, em metros."""
+    p = np.asarray(pontos_veiculo, dtype=np.float64)
+    if len(p) < 2:
+        return 0.0
+    return float(np.median(np.linalg.norm(np.diff(p[:, :2], axis=0), axis=1)))
+
+
 def truncar_no_primeiro_corte(
-    pontos_veiculo: np.ndarray, valido: np.ndarray
+    pontos_veiculo: np.ndarray, valido: np.ndarray, tolerancia_m: float = 0.0
 ) -> np.ndarray:
     """Mantém apenas o trecho contínuo que sai do capô.
 
     Uma rota que reaparece depois de um obstáculo confunde mais do que
     ajuda: o desenho deve terminar no primeiro ponto invisível.
+
+    ``tolerancia_m`` é o comprimento de trecho inválido que ainda é perdoado
+    antes do corte, **em metros** — e não em amostras, para não depender da
+    densidade com que a rota foi reamostrada. Com 0, um único ponto que raspe
+    o meio-fio ou a ilha central de um cruzamento encerra a rota inteira ali,
+    o que é severo demais dado o ruído de borda da segmentação. Algo em torno
+    de 3 m absorve raspões curtos e ainda corta em obstáculos reais.
     """
-    if not len(valido) or not valido[0]:
-        # tolera alguns pontos iniciais fora (borda inferior da imagem)
-        primeiro = int(np.argmax(valido)) if valido.any() else len(valido)
-        if primeiro >= len(valido):
+    if not len(valido):
+        return pontos_veiculo[:0]
+
+    # pula o trecho inicial invisível (capô, painel, borda inferior)
+    if not valido[0]:
+        if not valido.any():
             return pontos_veiculo[:0]
+        primeiro = int(np.argmax(valido))
         valido = valido[primeiro:]
         pontos_veiculo = pontos_veiculo[primeiro:]
 
-    corte = np.flatnonzero(~valido)
-    fim = int(corte[0]) if len(corte) else len(valido)
+    passo = espacamento_medio(pontos_veiculo)
+    limite = int(round(tolerancia_m / passo)) if passo > 1e-9 else 0
+
+    fim = len(valido)
+    falhas, ultimo_bom = 0, 0
+    for i, ok in enumerate(valido):
+        if ok:
+            falhas, ultimo_bom = 0, i
+        else:
+            falhas += 1
+            if falhas > limite:
+                fim = ultimo_bom + 1
+                break
+
     return pontos_veiculo[:fim]
 
 
@@ -199,11 +229,26 @@ def filtrar_rota(
     com_distorcao: bool = False,
     exigir_via: bool = True,
     truncar: bool = True,
+    tolerancia_fora_m: float = 3.0,
+    folga_tela_px: float = 600.0,
+    diagnostico: dict | None = None,
 ) -> tuple[np.ndarray, Projecao]:
     """Aplica todos os critérios do Passo 4 e devolve a rota utilizável.
 
     Retorna ``(pontos_no_veiculo, projecao)`` já recortados, para que o
     módulo de renderização possa gerar a fita 3D a partir dos mesmos pontos.
+
+    ``folga_tela_px`` é generosa de propósito. Sair do quadro **não** é motivo
+    para encerrar a rota: quem recorta na borda é o rasterizador, e cortar o
+    waypoint anterior faria a fita terminar visivelmente antes da margem da
+    imagem. Isso pesa especialmente em vídeo de celular em retrato, cujo campo
+    horizontal é estreito (~40°) — numa curva a rota deixa o quadro lateral
+    bem antes de acabar. A folga existe só para descartar coordenadas
+    absurdas de pontos rasantes ao horizonte.
+
+    Passando um dicionário em ``diagnostico``, ele é preenchido com quantos
+    pontos cada critério eliminou — útil para descobrir qual etapa está
+    encurtando a rota.
     """
     pontos = np.asarray(pontos_veiculo, dtype=np.float64)
     proj = (
@@ -213,14 +258,39 @@ def filtrar_rota(
     )
 
     largura, altura = intr.resolucao
-    valido = proj.a_frente & dentro_da_imagem(proj.uv, largura, altura, folga=40)
+    na_tela = proj.a_frente & dentro_da_imagem(
+        proj.uv, largura, altura, folga=folga_tela_px
+    )
+    valido = na_tela.copy()
 
+    na_via = None
     if mascara_via is not None and exigir_via:
-        valido &= sobre_a_via(proj.uv, mascara_via)
-    if obstaculos is not None and len(obstaculos):
-        valido &= ~ocluido_por_obstaculo(proj.uv, obstaculos)
+        na_via = sobre_a_via(proj.uv, mascara_via)
+        valido &= na_via
 
-    pontos_ok = truncar_no_primeiro_corte(pontos, valido) if truncar else pontos[valido]
+    livre = None
+    if obstaculos is not None and len(obstaculos):
+        livre = ~ocluido_por_obstaculo(proj.uv, obstaculos)
+        valido &= livre
+
+    pontos_ok = (
+        truncar_no_primeiro_corte(pontos, valido, tolerancia_fora_m)
+        if truncar
+        else pontos[valido]
+    )
+
+    if diagnostico is not None:
+        diagnostico.update(
+            {
+                "entrada": len(pontos),
+                "fora_da_tela": int((~na_tela).sum()),
+                "fora_da_via": int((~na_via).sum()) if na_via is not None else 0,
+                "ocluidos": int((~livre).sum()) if livre is not None else 0,
+                "validos": int(valido.sum()),
+                "apos_truncar": len(pontos_ok),
+                "tolerancia_fora_m": tolerancia_fora_m,
+            }
+        )
 
     proj_ok = (
         projetar_opencv(pontos_ok, intr, pose, com_distorcao=True)

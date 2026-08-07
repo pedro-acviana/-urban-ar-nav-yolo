@@ -210,13 +210,22 @@ class Corredor:
 
 
 def extrair_corredor(
-    mascara_bev: np.ndarray, grade: GradeBEV, largura_min_m: float = 1.5
+    mascara_bev: np.ndarray,
+    grade: GradeBEV,
+    largura_min_m: float = 1.5,
+    salto_max_frac: float = 0.35,
 ) -> Corredor:
     """Mede, em cada linha da BEV, a faixa de asfalto contínua à frente do carro.
 
     Para cada linha considera-se apenas o segmento **conectado à linha de
     baixo** (onde o carro está), evitando que a via da mão contrária ou um
     trecho de calçada sejam confundidos com o corredor atual.
+
+    ``salto_max_frac`` é o deslocamento lateral máximo tolerado entre linhas
+    vizinhas, como fração da largura da BEV. Numa curva fechada ou num
+    cruzamento em T o corredor anda rápido para o lado, e um limite apertado
+    faz o rastreamento desistir cedo demais — encurtando a rota sem que haja
+    nada de errado com a segmentação.
     """
     altura, largura = mascara_bev.shape[:2]
     m = mascara_bev > 0
@@ -239,7 +248,7 @@ def extrair_corredor(
             # procura o pixel de via mais próximo da referência
             candidatos = np.flatnonzero(linha)
             c = int(candidatos[np.argmin(np.abs(candidatos - c))])
-            if abs(c - col_ref) > 0.35 * largura:
+            if abs(c - col_ref) > salto_max_frac * largura:
                 continue  # salto grande demais: provavelmente outra via
 
         esq = c

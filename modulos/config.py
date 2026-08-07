@@ -134,6 +134,29 @@ class Config:
     largura_faixa_ar_m: float = 1.8
     """Largura da fita de realidade aumentada desenhada sobre o asfalto."""
 
+    tolerancia_fora_via_m: float = 3.0
+    """Trecho fora da via (m) perdoado antes de truncar a rota.
+
+    Com 0, um único ponto raspando o meio-fio ou a ilha central de um
+    cruzamento encerra o desenho. Em metros, e não em amostras, para não
+    depender da densidade da reamostragem.
+    """
+
+    folga_tela_px: float = 600.0
+    """Folga além da borda da imagem antes de considerar um ponto perdido.
+
+    Sair do quadro não encerra a rota — o rasterizador recorta na borda. Com
+    folga pequena, a fita termina visivelmente antes da margem, o que salta aos
+    olhos em vídeo de celular em retrato (FOV horizontal de ~40°).
+    """
+
+    salto_max_corredor: float = 0.35
+    """Deslocamento lateral máximo entre linhas no rastreio do corredor.
+
+    Fração da largura da BEV. Aumente em curvas fechadas e cruzamentos, onde
+    a via anda depressa para o lado e o rastreio desiste cedo demais.
+    """
+
     def __post_init__(self) -> None:
         self.raiz = Path(self.raiz)
         if self.offset_sync_s is None:

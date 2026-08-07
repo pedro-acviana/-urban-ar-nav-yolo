@@ -63,6 +63,68 @@ class Resultado:
         _grava("final", self.imagem_final)
         return salvos
 
+    def diagnostico(self) -> str:
+        """Mostra quanto da rota sobrevive a cada estágio do pipeline.
+
+        O painel de varredura de offset desenha a rota **crua** do GPS, sem
+        nenhum corte; o resultado final passa por três truncamentos em série.
+        Quando o desenho final sai bem mais curto que o do painel, é aqui que
+        se vê qual estágio é o responsável.
+        """
+        def _extensao(pts) -> str:
+            if pts is None or len(pts) == 0:
+                return "vazia"
+            return f"{pts[:, 0].min():5.1f} -> {pts[:, 0].max():5.1f} m"
+
+        linhas = [
+            "Sobrevivência da rota, estágio a estágio",
+            f"  1. GPS cru (como no painel de offset) ... "
+            f"{len(self.rota_veiculo):4d} pts  {_extensao(self.rota_veiculo)}",
+        ]
+
+        if self.corredor is not None:
+            ini, fim = self.corredor.faixa_visivel
+            linhas.append(
+                f"  2. corredor dirigivel detectado ........ "
+                f"{'':9s}{ini:5.1f} -> {fim:5.1f} m"
+            )
+        else:
+            linhas.append("  2. corredor ............................ sem segmentação")
+
+        linhas.append(
+            f"  3. apos ajuste + spline ................ "
+            f"{len(self.rota_ajustada):4d} pts  {_extensao(self.rota_ajustada)}"
+        )
+        linhas.append(
+            f"  4. apos filtro de projecao ............. "
+            f"{len(self.rota_final):4d} pts  {_extensao(self.rota_final)}"
+        )
+
+        d = self.extras.get("diagnostico_filtro") or {}
+        if d:
+            linhas += [
+                "",
+                "Motivos de descarte no filtro de projeção:",
+                f"  fora da tela ....... {d.get('fora_da_tela', 0)}",
+                f"  fora da via ........ {d.get('fora_da_via', 0)}",
+                f"  ocluidos ........... {d.get('ocluidos', 0)}",
+                f"  validos ............ {d.get('validos', 0)} de {d.get('entrada', 0)}",
+                f"  apos truncar ....... {d.get('apos_truncar', 0)}"
+                f"  (tolerancia {d.get('tolerancia_fora_m', 0):.1f} m)",
+            ]
+
+        perda = len(self.rota_veiculo) and (
+            self.rota_veiculo[:, 0].max() - (self.rota_final[:, 0].max() if len(self.rota_final) else 0)
+        )
+        if perda and perda > 5:
+            linhas += [
+                "",
+                f"A rota final termina {perda:.0f} m antes da rota crua. Se a via segue",
+                "visível além disso, relaxe `salto_max_frac` (rastreio do corredor)",
+                "ou `tolerancia_fora_via_m` (filtro de projeção).",
+            ]
+        return "\n".join(linhas)
+
 
 def executar(
     cfg: Config,
@@ -134,7 +196,9 @@ def executar(
     rota_ajustada = rota_veiculo
     if seg is not None:
         mascara_bev = ipm.mascara_para_bev(seg.area_dirigivel, H_solo, grade)
-        corredor = ipm.extrair_corredor(mascara_bev, grade)
+        corredor = ipm.extrair_corredor(
+            mascara_bev, grade, salto_max_frac=cfg.salto_max_corredor
+        )
         rota_ajustada = ipm.ajustar_rota_ao_corredor(
             rota_veiculo, corredor, cfg.margem_borda_m, cfg.peso_centro
         )
@@ -142,6 +206,7 @@ def executar(
 
     # -- Módulo 6: projeção e render -----------------------------------
     log("[6/6] projeção e renderização")
+    diag_filtro: dict = {}
     rota_final, _ = projection.filtrar_rota(
         rota_ajustada,
         intr,
@@ -149,6 +214,9 @@ def executar(
         mascara_via=seg.area_dirigivel if seg else None,
         obstaculos=seg.obstaculos if seg else None,
         exigir_via=seg is not None,
+        tolerancia_fora_m=cfg.tolerancia_fora_via_m,
+        folga_tela_px=cfg.folga_tela_px,
+        diagnostico=diag_filtro,
     )
 
     imagem = render.desenhar_rota(
@@ -175,6 +243,7 @@ def executar(
     )
 
     extras = {
+        "diagnostico_filtro": diag_filtro,
         "H_solo_para_imagem": H_solo,
         "bev_anotada": ipm.desenhar_bev(
             bev, grade, rota_veiculo, rota_ajustada, corredor

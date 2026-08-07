@@ -125,11 +125,33 @@ class Config:
     # ------------------------------------------------------------------
     # Ajuste da rota ao corredor dirigível
     # ------------------------------------------------------------------
+    ajustar_ao_corredor: bool = False
+    """Se True, empurra a rota para o centro da via e a trunca pela faixa visível.
+
+    Padrão False (V2): confia na rota crua do GPS e deixa **só a máscara de
+    segmentação** decidir onde ela aparece, via recorte na renderização. É o
+    comportamento mais previsível — o ajuste ao corredor introduz três
+    truncamentos em série que encurtam o desenho sem que fique claro o motivo,
+    e o rastreio lateral do corredor é frágil em cruzamentos.
+
+    Ligue quando quiser corrigir o erro sistemático do GPS (rota subindo na
+    calçada) e o corredor estiver bem definido — via reta e sem bifurcação.
+    """
+
+    exigir_via_no_filtro: bool = False
+    """Se True, trunca a rota no ponto em que ela sai da área dirigível.
+
+    Padrão False: o recorte visual já é feito na renderização, então truncar
+    aqui só encurta a geometria sem ganho de imagem.
+    """
+
     margem_borda_m: float = 0.8
-    """Distância mínima entre a rota e a borda da área dirigível."""
+    """Distância mínima entre a rota e a borda da área dirigível.
+    Só tem efeito com ``ajustar_ao_corredor=True``."""
 
     peso_centro: float = 0.35
-    """0 = confia só no GPS; 1 = cola no centro da via detectada."""
+    """0 = confia só no GPS; 1 = cola no centro da via detectada.
+    Só tem efeito com ``ajustar_ao_corredor=True``."""
 
     largura_faixa_ar_m: float = 1.8
     """Largura da fita de realidade aumentada desenhada sobre o asfalto."""

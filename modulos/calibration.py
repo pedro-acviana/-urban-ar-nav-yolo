@@ -285,6 +285,103 @@ def altura_por_referencia(
     return float(distancia_m * np.tan(ang))
 
 
+def ajustar_pose_por_referencias(
+    intr: Intrinsecos,
+    referencias: list[tuple[float, float]],
+    altura_inicial: float = 1.50,
+    pitch_inicial: float = -10.0,
+) -> tuple[PoseCamera, dict]:
+    """Ajusta altura **e** pitch a partir de pontos de distância conhecida.
+
+    ``referencias`` é uma lista de pares ``(v, distancia_m)``: a linha da
+    imagem em que um ponto do asfalto aparece e a distância real dele até o
+    carro. Dois pontos já bastam; três ou mais permitem ver o resíduo.
+
+    Por que não ajustar só a altura: no eixo central, um ponto a distância
+    ``d`` cai na linha
+
+    .. math::
+        v = c_y + f_y \\, \\frac{h\\cos\\theta - d\\sin\\theta}
+                              {h\\sin\\theta + d\\cos\\theta},
+        \\quad \\theta = -\\text{pitch}
+
+    A altura escala as distâncias de forma aproximadamente proporcional; o
+    pitch as desloca de forma não linear, com efeito muito maior ao longe.
+    Um erro que aparece como "5 m a mais em toda a grade" não é explicável só
+    pela altura — ela teria que assumir um valor diferente a cada distância —
+    e por isso os dois parâmetros são estimados juntos, por mínimos quadrados
+    sobre os resíduos em pixels.
+
+    Devolve ``(pose, relatorio)``.
+    """
+    from scipy.optimize import least_squares
+
+    if len(referencias) < 2:
+        raise ValueError(
+            "São necessários ao menos 2 pontos de referência para separar "
+            "altura de pitch. Com 1 ponto, use altura_por_referencia()."
+        )
+
+    vs = np.array([r[0] for r in referencias], dtype=float)
+    ds = np.array([r[1] for r in referencias], dtype=float)
+
+    if np.any(ds <= 0):
+        raise ValueError("Distâncias de referência devem ser positivas.")
+
+    def linha_prevista(h: float, pitch_deg: float, d: np.ndarray) -> np.ndarray:
+        th = -np.deg2rad(pitch_deg)
+        num = h * np.cos(th) - d * np.sin(th)
+        den = h * np.sin(th) + d * np.cos(th)
+        return intr.cy + intr.fy * num / den
+
+    def residuo(p):
+        return linha_prevista(p[0], p[1], ds) - vs
+
+    sol = least_squares(
+        residuo,
+        x0=[altura_inicial, pitch_inicial],
+        bounds=([0.3, -45.0], [3.0, 45.0]),
+    )
+    altura, pitch = float(sol.x[0]), float(sol.x[1])
+
+    res_px = residuo(sol.x)
+    # o mesmo resíduo, lido em metros de distância
+    dist_ajustada = np.array(
+        [distancia_no_solo(intr, PoseCamera(altura, pitch), v) for v in vs]
+    )
+
+    relatorio = {
+        "altura_m": altura,
+        "pitch_deg": pitch,
+        "residuo_px_rms": float(np.sqrt(np.mean(res_px**2))),
+        "residuo_px_max": float(np.max(np.abs(res_px))),
+        "distancia_esperada_m": ds,
+        "distancia_ajustada_m": dist_ajustada,
+        "erro_m": dist_ajustada - ds,
+        "convergiu": bool(sol.success),
+    }
+    return PoseCamera(altura_m=altura, pitch_deg=pitch), relatorio
+
+
+def relatorio_referencias(relatorio: dict) -> str:
+    """Formata o resultado de :func:`ajustar_pose_por_referencias`."""
+    linhas = [
+        f"altura .......... {relatorio['altura_m']:.3f} m",
+        f"pitch ........... {relatorio['pitch_deg']:+.2f}°",
+        f"resíduo ......... {relatorio['residuo_px_rms']:.1f} px RMS "
+        f"(máx {relatorio['residuo_px_max']:.1f} px)",
+        "",
+        f"{'esperado':>10} {'ajustado':>10} {'erro':>8}",
+    ]
+    for e, a, err in zip(
+        relatorio["distancia_esperada_m"],
+        relatorio["distancia_ajustada_m"],
+        relatorio["erro_m"],
+    ):
+        linhas.append(f"{e:>9.1f}m {a:>9.1f}m {err:>+7.2f}m")
+    return "\n".join(linhas)
+
+
 def distancia_no_solo(intr: Intrinsecos, pose: PoseCamera, v: float) -> float:
     """Distância à frente (m) correspondente à linha ``v`` no eixo central.
 

@@ -84,9 +84,10 @@ class Resultado:
 
         if self.corredor is not None:
             ini, fim = self.corredor.faixa_visivel
+            estado = "aplicado" if self.config.ajustar_ao_corredor else "só referência"
             linhas.append(
-                f"  2. corredor dirigivel detectado ........ "
-                f"{'':9s}{ini:5.1f} -> {fim:5.1f} m"
+                f"  2. corredor dirigivel ({estado:13s}) {'':2s}"
+                f"{ini:5.1f} -> {fim:5.1f} m"
             )
         else:
             linhas.append("  2. corredor ............................ sem segmentação")
@@ -196,12 +197,15 @@ def executar(
     rota_ajustada = rota_veiculo
     if seg is not None:
         mascara_bev = ipm.mascara_para_bev(seg.area_dirigivel, H_solo, grade)
+        # o corredor é sempre extraído: mesmo sem ajustar a rota, ele é a
+        # referência para conferir o alinhamento na bird's-eye view
         corredor = ipm.extrair_corredor(
             mascara_bev, grade, salto_max_frac=cfg.salto_max_corredor
         )
-        rota_ajustada = ipm.ajustar_rota_ao_corredor(
-            rota_veiculo, corredor, cfg.margem_borda_m, cfg.peso_centro
-        )
+        if cfg.ajustar_ao_corredor:
+            rota_ajustada = ipm.ajustar_rota_ao_corredor(
+                rota_veiculo, corredor, cfg.margem_borda_m, cfg.peso_centro
+            )
     rota_ajustada = ipm.suavizar_rota(rota_ajustada)
 
     # -- Módulo 6: projeção e render -----------------------------------
@@ -213,7 +217,7 @@ def executar(
         pose,
         mascara_via=seg.area_dirigivel if seg else None,
         obstaculos=seg.obstaculos if seg else None,
-        exigir_via=seg is not None,
+        exigir_via=(seg is not None) and cfg.exigir_via_no_filtro,
         tolerancia_fora_m=cfg.tolerancia_fora_via_m,
         folga_tela_px=cfg.folga_tela_px,
         diagnostico=diag_filtro,

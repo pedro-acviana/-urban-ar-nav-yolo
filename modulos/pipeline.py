@@ -152,7 +152,13 @@ def executar(
     )
 
     imagem = render.desenhar_rota(
-        frame_corrigido, rota_final, intr, pose, cfg.largura_faixa_ar_m
+        frame_corrigido,
+        rota_final,
+        intr,
+        pose,
+        cfg.largura_faixa_ar_m,
+        # a segmentação tem a palavra final: nada é pintado fora do asfalto
+        mascara_recorte=seg.area_dirigivel if seg else None,
     )
     imagem = render.desenhar_marcadores_distancia(imagem, rota_final, intr, pose)
     imagem = render.desenhar_minimapa(imagem, trilha, rota_enu, estado)

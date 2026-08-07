@@ -143,7 +143,11 @@ Autonomous-Car-Simulation-with-Genetic-Algorithm/   submódulo
    estimar pitch/roll pelo ponto de fuga das faixas.
 2. **Solo plano** — a IPM assume `Z = 0`; em ladeira o erro cresce com a
    distância.
-3. **Sincronização por offset constante**, sem correção de deriva.
+3. **Sincronização por offset constante**, sem correção de deriva. O
+   estimador automático (`sync.perfil_de_movimento` + `sync.estimar_offset`)
+   correlaciona o fluxo óptico do vídeo com a velocidade e a guinada do GPX,
+   mas precisa de eventos marcantes; em trajetos retilíneos a correlação não
+   converge e o ajuste recai sobre `render.painel_offsets`, visual.
 4. **Calibração com fotos**, cuja proporção difere levemente da do vídeo:
    `fx` e `fy` recebem fatores de escala distintos. Recalibrar gravando vídeo
    elimina a aproximação.

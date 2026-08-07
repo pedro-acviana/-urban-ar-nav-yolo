@@ -45,12 +45,20 @@ def desenhar_rota(
     cor_perto=COR_PERTO,
     cor_longe=COR_LONGE,
     contorno: bool = True,
+    mascara_recorte: np.ndarray | None = None,
+    suavizar_recorte: int = 3,
 ) -> np.ndarray:
     """Projeta a fita 3D e a compõe sobre o frame.
 
     A fita é fatiada em quadriláteros consecutivos e desenhada do mais
     distante para o mais próximo, de modo que os segmentos próximos fiquem
     por cima — a ordem de pintura correta para respeitar a profundidade.
+
+    ``mascara_recorte`` (tipicamente a área dirigível do YOLOPv2) limita o
+    desenho ao asfalto: **nada é pintado fora dela**. É o que impede a faixa
+    de invadir o capô, o painel e a calçada, mesmo quando a geometria projeta
+    pontos ali — a segmentação passa a ter a palavra final sobre onde a
+    realidade aumentada pode existir.
     """
     if len(pontos_veiculo) < 2:
         return frame.copy()
@@ -63,7 +71,9 @@ def desenhar_rota(
     )
     uv_e, uv_d = projeta(esq), projeta(dir_)
 
+    h, w = frame.shape[:2]
     camada = frame.copy()
+    pintado = np.zeros((h, w), dtype=np.uint8)
     n = len(uv_e) - 1
 
     for i in range(n - 1, -1, -1):
@@ -74,18 +84,35 @@ def desenhar_rota(
             continue
         cor = interpolar_cor(cor_perto, cor_longe, i / max(n - 1, 1))
         cv2.fillConvexPoly(camada, np.int32(quad), cor, cv2.LINE_AA)
-
-    out = cv2.addWeighted(camada, alpha, frame, 1 - alpha, 0)
+        cv2.fillConvexPoly(pintado, np.int32(quad), 255, cv2.LINE_AA)
 
     if contorno:
         for uv in (uv_e, uv_d):
             pts = uv[np.isfinite(uv).all(axis=1)]
             if len(pts) > 1:
                 cv2.polylines(
-                    out, [np.int32(pts).reshape(-1, 1, 2)], False,
+                    camada, [np.int32(pts).reshape(-1, 1, 2)], False,
                     (255, 255, 255), 2, cv2.LINE_AA,
                 )
-    return out
+                cv2.polylines(
+                    pintado, [np.int32(pts).reshape(-1, 1, 2)], False,
+                    255, 2, cv2.LINE_AA,
+                )
+
+    if mascara_recorte is not None:
+        via = (mascara_recorte > 0).astype(np.uint8) * 255
+        if via.shape[:2] != (h, w):
+            via = cv2.resize(via, (w, h), interpolation=cv2.INTER_NEAREST)
+        pintado = cv2.bitwise_and(pintado, via)
+
+    if suavizar_recorte > 0:
+        k = 2 * suavizar_recorte + 1
+        peso = cv2.GaussianBlur(pintado, (k, k), 0).astype(np.float32) / 255.0
+    else:
+        peso = pintado.astype(np.float32) / 255.0
+
+    peso = (peso * alpha)[..., None]
+    return (camada.astype(np.float32) * peso + frame.astype(np.float32) * (1 - peso)).astype(np.uint8)
 
 
 def desenhar_marcadores_distancia(
@@ -245,6 +272,58 @@ def desenhar_hud(
         cv2.putText(out, texto, (margem + 14, y), fonte, escala, (255, 255, 255), espessura, cv2.LINE_AA)
         y += passo
     return out
+
+
+def painel_offsets(
+    frame: np.ndarray,
+    trilha: pd.DataFrame,
+    info_video,
+    frame_alvo: int,
+    offsets,
+    intr: Intrinsecos,
+    pose: PoseCamera,
+    horizonte_s: float = 12.0,
+    distancia_max_m: float = 40.0,
+    largura_col: int = 380,
+) -> np.ndarray:
+    """Compara lado a lado a rota projetada para vários offsets de sincronização.
+
+    Quando a correlação automática não converge — trajeto retilíneo, poucos
+    pontos GPS, sem evento marcante — este painel resolve por inspeção: o
+    offset correto é aquele em que a rota **acompanha o asfalto visível**.
+
+    Cada quadro traz também a velocidade e o heading do GPS naquele instante,
+    que ajudam a confirmar: se o carro está visivelmente entrando numa curva,
+    o offset certo mostra velocidade baixa e heading girando.
+    """
+    from . import sync as _sync
+
+    quadros: dict[str, np.ndarray] = {}
+    for o in offsets:
+        img = frame.copy()
+        try:
+            est = _sync.estado_no_frame(trilha, frame_alvo, info_video, o)
+            rota = _sync.trajetoria_futura(
+                trilha, est, o, horizonte_s, distancia_max_m
+            )
+            pts = _sync.apenas_a_frente(_sync.enu_para_veiculo(rota, est))
+            img = desenhar_rota(img, pts, intr, pose, largura_m=1.8, alpha=0.5)
+            img = desenhar_hud(
+                img,
+                [
+                    f"offset {o:+.1f} s",
+                    f"v {est.velocidade * 3.6:.0f} km/h",
+                    f"hdg {est.heading_deg:.0f} deg",
+                    f"Y@{distancia_max_m:.0f}m {pts[-1, 1]:+.1f} m",
+                ],
+                escala=1.4,
+            )
+        except Exception as erro:
+            img = desenhar_hud(img, [f"offset {o:+.1f} s", "sem dados"], escala=1.4)
+            del erro
+        quadros[f"offset {o:+.1f} s"] = img
+
+    return montar_painel(quadros, largura_col=largura_col)
 
 
 def montar_painel(imagens: dict[str, np.ndarray], largura_col: int = 640) -> np.ndarray:

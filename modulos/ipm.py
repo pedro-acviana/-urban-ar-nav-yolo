@@ -157,27 +157,56 @@ class Corredor:
         return self.y_esq - self.y_dir
 
     @property
-    def alcance_visivel(self) -> float:
-        """Maior distância à frente com via detectada de forma contínua.
+    def faixa_visivel(self) -> tuple[float, float]:
+        """Trecho contínuo de asfalto visível: ``(x_inicial, x_final)`` em metros.
 
-        É o limite natural da rota: além dele não há asfalto visível, e
-        desenhar a faixa faria a linha "flutuar" sobre o horizonte.
+        Num vídeo gravado de dentro do carro, o painel e o capô cobrem os
+        primeiros metros à frente — ali não há via detectada, ainda que a rua
+        esteja perfeitamente segmentada logo adiante. Por isso a busca **não**
+        parte da distância zero: ela localiza o trecho contínuo mais longo de
+        via detectada, tolerando buracos curtos.
+
+        Fora dessa faixa não se desenha: antes dela a rota apareceria sobre o
+        capô; depois, flutuando no horizonte.
         """
         if not self.valido.any():
-            return 0.0
-        # percorre do carro para longe e para no primeiro buraco relevante
+            return (0.0, 0.0)
+
         ordem = np.argsort(self.x)
         x_ord, val_ord = self.x[ordem], self.valido[ordem]
-        limite = x_ord[0]
-        falhas = 0
-        for xi, vi in zip(x_ord, val_ord):
-            if vi:
-                limite, falhas = xi, 0
-            else:
-                falhas += 1
-                if falhas > 3:
-                    break
-        return float(limite)
+
+        melhor = (0.0, 0.0, -1.0)  # (início, fim, comprimento)
+        i = 0
+        n = len(x_ord)
+        while i < n:
+            if not val_ord[i]:
+                i += 1
+                continue
+            j, fim, falhas = i, i, 0
+            while j + 1 < n:
+                j += 1
+                if val_ord[j]:
+                    fim, falhas = j, 0
+                else:
+                    falhas += 1
+                    if falhas > 3:
+                        break
+            comprimento = x_ord[fim] - x_ord[i]
+            if comprimento > melhor[2]:
+                melhor = (float(x_ord[i]), float(x_ord[fim]), comprimento)
+            i = j + 1
+
+        return (melhor[0], melhor[1])
+
+    @property
+    def inicio_visivel(self) -> float:
+        """Distância a partir da qual a via aparece (borda do capô)."""
+        return self.faixa_visivel[0]
+
+    @property
+    def alcance_visivel(self) -> float:
+        """Maior distância à frente com via detectada de forma contínua."""
+        return self.faixa_visivel[1]
 
 
 def extrair_corredor(
@@ -298,8 +327,8 @@ def ajustar_rota_ao_corredor(
     saida[:, 1] = y_ajust
 
     if limitar_ao_visivel:
-        alcance = corredor.alcance_visivel
-        saida = saida[saida[:, 0] <= max(alcance, 0.0)]
+        inicio, fim = corredor.faixa_visivel
+        saida = saida[(saida[:, 0] >= inicio) & (saida[:, 0] <= fim)]
 
     return saida
 

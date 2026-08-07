@@ -58,6 +58,168 @@ def diagnosticar(df: pd.DataFrame, info_video: InfoVideo, offset_s: float) -> st
 
 
 # ----------------------------------------------------------------------
+# 2b.1b Estimativa automática do offset
+# ----------------------------------------------------------------------
+
+
+def perfil_de_movimento(
+    caminho_video,
+    passo_frames: int = 14,
+    largura: int = 160,
+    frame_inicial: int = 0,
+    frame_final: int | None = None,
+    recorte_superior: float = 0.45,
+) -> pd.DataFrame:
+    """Mede o movimento aparente ao longo do vídeo, via fluxo óptico denso.
+
+    Para cada par de frames amostrados calcula o fluxo (Farnebäck) numa versão
+    reduzida da imagem e extrai dois sinais:
+
+    * ``fluxo``   — magnitude mediana, um substituto da **velocidade**: quando
+      o carro para, cai a quase zero; quando acelera, cresce junto;
+    * ``fluxo_x`` — componente horizontal média, um substituto da **taxa de
+      guinada**: numa curva à direita a cena inteira desliza para a esquerda.
+
+    ``recorte_superior`` limita a análise à fração de cima do quadro. Isso é
+    essencial em vídeo gravado de dentro do carro: o painel e o capô ocupam a
+    metade inferior e são estáticos, então incluí-los faria a mediana do fluxo
+    ficar presa em zero, independentemente da velocidade.
+
+    Devolve ``t`` (s de vídeo), ``fluxo`` e ``fluxo_x`` (px/amostra).
+    """
+    import cv2
+
+    cap = cv2.VideoCapture(str(caminho_video))
+    if not cap.isOpened():
+        raise RuntimeError(f"Não foi possível abrir o vídeo: {caminho_video}")
+
+    fps = cap.get(cv2.CAP_PROP_FPS)
+    total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    frame_final = total if frame_final is None else min(frame_final, total)
+
+    if frame_inicial:
+        cap.set(cv2.CAP_PROP_POS_FRAMES, frame_inicial)
+
+    linhas, anterior, indice = [], None, frame_inicial
+    try:
+        while indice < frame_final:
+            ok = cap.grab()
+            if not ok:
+                break
+            if (indice - frame_inicial) % passo_frames == 0:
+                ok, quadro = cap.retrieve()
+                if not ok:
+                    break
+                h, w = quadro.shape[:2]
+                pequeno = cv2.cvtColor(
+                    cv2.resize(quadro, (largura, int(h * largura / w))),
+                    cv2.COLOR_BGR2GRAY,
+                )
+                pequeno = pequeno[: max(int(pequeno.shape[0] * recorte_superior), 8)]
+
+                if anterior is not None:
+                    fluxo = cv2.calcOpticalFlowFarneback(
+                        anterior, pequeno, None, 0.5, 3, 15, 3, 5, 1.2, 0
+                    )
+                    linhas.append(
+                        {
+                            "t": indice / fps,
+                            "fluxo": float(np.median(np.linalg.norm(fluxo, axis=2))),
+                            "fluxo_x": float(np.mean(fluxo[..., 0])),
+                        }
+                    )
+                anterior = pequeno
+            indice += 1
+    finally:
+        cap.release()
+
+    return pd.DataFrame(linhas)
+
+
+def _normalizar(v: np.ndarray) -> np.ndarray:
+    v = np.asarray(v, dtype=float)
+    return (v - v.mean()) / (v.std() + 1e-9)
+
+
+def estimar_offset(
+    trilha: pd.DataFrame,
+    perfil: pd.DataFrame,
+    faixa_s: tuple[float, float] = (-30.0, 30.0),
+    passo_s: float = 0.1,
+    sinal: str = "guinada",
+) -> tuple[float, float, pd.DataFrame]:
+    """Encontra o offset que melhor alinha o vídeo ao GPX, por correlação.
+
+    Para cada candidato ``o``, o sinal derivado do GPX é reamostrado nos
+    instantes ``t_vídeo - o`` e comparado ao perfil de movimento pela
+    correlação de Pearson. O máximo da curva é o alinhamento procurado.
+
+    ``sinal`` escolhe o que comparar:
+
+    * ``"guinada"`` (padrão) — taxa de variação do heading contra o fluxo
+      horizontal. Curvas são eventos bem localizados no tempo, o que produz um
+      pico estreito e confiável;
+    * ``"velocidade"`` — velocidade do GPS contra a magnitude do fluxo. Só
+      funciona bem se houver paradas ou variações fortes de velocidade;
+    * ``"ambos"`` — média das duas correlações.
+
+    Devolve ``(offset, correlação, curva)``. Correlação baixa (< ~0.4) ou um
+    pico pouco destacado indicam alinhamento não confiável — normalmente
+    porque o trecho é retilíneo e de velocidade constante, sem âncora.
+    """
+    if len(perfil) < 5:
+        raise ValueError("Perfil de movimento curto demais.")
+
+    t_perfil = perfil["t"].values
+
+    # sinais do vídeo
+    mag = _normalizar(perfil["fluxo"].values)
+    # cena deslizando para a esquerda (fluxo_x < 0) = carro virando à direita
+    guinada_video = _normalizar(-perfil["fluxo_x"].values) if "fluxo_x" in perfil else None
+
+    # sinais do GPX
+    t_gps = trilha["t"].values
+    vel_gps = trilha["velocidade"].values
+    guinada_gps = np.gradient(np.unwrap(trilha["heading"].values), t_gps)
+
+    candidatos = np.arange(faixa_s[0], faixa_s[1] + 1e-9, passo_s)
+    linhas = []
+
+    for o in candidatos:
+        t = t_perfil - o
+        dentro = (t >= t_gps[0]) & (t <= t_gps[-1])
+        if dentro.sum() < 10:
+            linhas.append((o, np.nan, np.nan))
+            continue
+
+        c_vel = float(np.mean(_normalizar(np.interp(t[dentro], t_gps, vel_gps)) * mag[dentro]))
+
+        c_gui = np.nan
+        if guinada_video is not None:
+            c_gui = float(
+                np.mean(
+                    _normalizar(np.interp(t[dentro], t_gps, guinada_gps))
+                    * guinada_video[dentro]
+                )
+            )
+        linhas.append((o, c_vel, c_gui))
+
+    curva = pd.DataFrame(linhas, columns=["offset", "corr_velocidade", "corr_guinada"])
+
+    coluna = {
+        "velocidade": "corr_velocidade",
+        "guinada": "corr_guinada",
+        "ambos": "corr_media",
+    }[sinal]
+    if sinal == "ambos":
+        curva["corr_media"] = curva[["corr_velocidade", "corr_guinada"]].mean(axis=1)
+
+    curva["correlacao"] = curva[coluna]
+    melhor = curva.loc[curva["correlacao"].idxmax()]
+    return float(melhor["offset"]), float(melhor["correlacao"]), curva
+
+
+# ----------------------------------------------------------------------
 # 2b.2 Estado do veículo num frame
 # ----------------------------------------------------------------------
 

@@ -2,6 +2,7 @@
 # Dados brutos e pesos — grandes demais para o Git.
 # Ver README para instruções de download / geração.
 # ----------------------------------------------------------------------
+docs/
 data/*.mp4
 data/*.mov
 data/*.MOV

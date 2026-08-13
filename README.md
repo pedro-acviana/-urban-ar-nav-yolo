@@ -4,8 +4,6 @@ Protótipo do PIBIC 26/27. Dada uma rota gravada por GPS, os parâmetros de
 calibração da câmera e a segmentação da via por uma rede neural, o sistema
 desenha o trajeto futuro **sobre o asfalto**, na perspectiva do motorista.
 
-![pipeline](docs/pipeline.svg)
-
 ## Ideia
 
 O trajeto vem do GPS; o asfalto visível vem da câmera. Cada um sozinho é
@@ -61,30 +59,40 @@ Para pontos do solo (`Z = 0`) a projeção colapsa numa homografia
 
 ## Instalação
 
+Desenvolvido em **Python 3.14.5**. O único submódulo é o YOLOPv2.
+
 ```bash
 git clone --recurse-submodules https://github.com/pedro-acviana/-urban-ar-nav-yolo.git
 cd -urban-ar-nav-yolo
 pip install -r requirements.txt
 ```
 
-Se já tiver clonado sem os submódulos:
+Se já tiver clonado sem o submódulo:
 
 ```bash
-git submodule update --init --recursive
+git submodule update --init YOLOPv2
 ```
 
-### Insumos não versionados
+Falta só baixar os pesos, e o pipeline roda:
 
-Os arquivos abaixo ficam fora do Git por tamanho e precisam ser obtidos
-separadamente:
+```bash
+curl -L -o YOLOPv2/data/weights/yolopv2.pt \
+  https://github.com/CAIC-AD/YOLOPv2/releases/download/V0.0.1/yolopv2.pt
+```
 
-| Arquivo | Como obter |
-|---|---|
-| `YOLOPv2/data/weights/yolopv2.pt` | [release oficial](https://github.com/CAIC-AD/YOLOPv2/releases/download/V0.0.1/yolopv2.pt) (~156 MB) |
-| `data/*.mp4` | vídeos gravados em campo |
-| `camera_calibration/imagens_calibracao/` | fotos do tabuleiro de xadrez |
+### O que vem no repositório, e o que não vem
 
-Os `.gpx` e o `calibracao_camera.json` **estão** versionados.
+Os frames de trabalho **são versionados** (`data/frames/`), então um clone roda
+o pipeline de ponta a ponta sem precisar dos vídeos brutos. Também estão no
+Git os `.gpx`/`.kml` e o `calibracao_camera.json`.
+
+Fica de fora, por tamanho:
+
+| Arquivo | Precisa? | Como obter |
+|---|---|---|
+| `YOLOPv2/data/weights/yolopv2.pt` | **sim** | [release oficial](https://github.com/CAIC-AD/YOLOPv2/releases/download/V0.0.1/yolopv2.pt) (~156 MB) |
+| `data/*.mp4` | só para exportar frames novos | vídeos gravados em campo, ~400 MB cada |
+| `camera_calibration/imagens_calibracao/` | só para recalibrar | fotos do tabuleiro de xadrez |
 
 ## Uso
 
@@ -104,6 +112,35 @@ cfg = Config(nome_percurso="volta_menor", frame_alvo=692,
 resultado = pipeline.executar(cfg)
 resultado.salvar()
 ```
+
+### Frames como fonte principal
+
+O pipeline lê as imagens de `data/frames/<percurso>/`, não do `.mp4`. Cada
+pasta tem os PNGs e um `info.json` com os metadados do vídeo de origem — é
+dele que sai o `fps` usado para casar o frame com o relógio do GPX, de modo
+que a sincronização continua exata sem o vídeo por perto.
+
+```python
+cfg.frames_exportados()      # [400, 692, 1200, 2000, 2600, 3400, 4166]
+cfg.checar_arquivos()        # o .mp4 aparece como opcional
+```
+
+`Config.fonte_frames` controla a escolha: `"auto"` (padrão) usa os frames
+quando existem e cai no `.mp4` quando não; `"frames"` e `"video"` forçam um
+dos dois. Para trabalhar num frame que ainda não foi exportado, é preciso ter
+o vídeo:
+
+```bash
+python scripts/exportar_frames.py volta_menor --frames 1500 1800
+```
+
+> **Taxa variável.** Os `.mp4` de celular são VFR: a leitura sequencial e o
+> seek por índice apontam para instantes diferentes — no `volta_menor` a
+> diferença chega a 1,7 s no frame 692. Todo o pipeline usa a convenção do
+> seek (`t = índice / fps`), que é a mesma de `video.extrair_frame` e a que
+> `exportar_frames` reproduz. `video.extrair_varios` conta frame a frame e
+> **não** serve para exportar: trocaria a imagem sob uma calibração de offset
+> que continua apontando para o instante antigo.
 
 ### Offset de sincronização
 
@@ -141,14 +178,12 @@ cal.altura_por_referencia(intr, pitch_deg=0.0, v=1350, distancia_m=8.0)
 ```
 modulos/          pacote com as etapas do pipeline
 notebooks/        workflow_prototipo.ipynb (+ legado/)
-data/             .gpx, .kml versionados; .mp4 ignorados
+data/             .gpx e .kml versionados; .mp4 ignorados
+  frames/<percurso>/   PNGs + info.json — a fonte de imagens, versionada
+scripts/          exportar_frames.py, destravar_git.sh
 camera_calibration/  calibracao_camera.json + script de calibração
-docs/             plano e diagramas
+output/           resultados do pipeline (ignorado)
 YOLOPv2/          submódulo — segmentação de via
-HybridNets/       submódulo — alternativa ao YOLOPv2
-deepdrive/        submódulo — simulador
-sumo/             submódulo — simulação de tráfego
-Autonomous-Car-Simulation-with-Genetic-Algorithm/   submódulo
 ```
 
 ## Limitações
@@ -166,6 +201,8 @@ Autonomous-Car-Simulation-with-Genetic-Algorithm/   submódulo
    `fx` e `fy` recebem fatores de escala distintos. Recalibrar gravando vídeo
    elimina a aproximação.
 5. **Um frame por vez**, sem filtro temporal.
+6. **Só os frames exportados** são alcançáveis num clone. Varrer o percurso
+   inteiro (o painel de offset, por exemplo) ainda exige o `.mp4` original.
 
 ## Referências
 

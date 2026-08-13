@@ -143,9 +143,11 @@ def executar(
     log("[1/6] GPS")
     trilha = gps.preparar(cfg.gpx, cfg.janela_savgol, cfg.ordem_savgol)
 
-    # -- Módulo 2: vídeo e sincronização -------------------------------
-    log("[2/6] vídeo e sincronização")
-    info = video.info(cfg.video)
+    # -- Módulo 2: imagem e sincronização ------------------------------
+    log("[2/6] imagem e sincronização")
+    fonte = cfg.abrir_fonte()
+    log(f"      fonte: {fonte}")
+    info = fonte.info
     estado = sync.estado_no_frame(trilha, cfg.frame_alvo, info, cfg.offset_sync_s)
     rota_enu = sync.trajetoria_futura(
         trilha, estado, cfg.offset_sync_s, cfg.horizonte_s, cfg.distancia_max_m
@@ -153,7 +155,7 @@ def executar(
     rota_veiculo = sync.apenas_a_frente(
         sync.enu_para_veiculo(rota_enu, estado, cfg.usar_elevacao)
     )
-    frame = video.extrair_frame(cfg.video, cfg.frame_alvo)
+    frame = fonte.frame(cfg.frame_alvo)
 
     # -- Módulo 3: calibração ------------------------------------------
     log("[3/6] calibração")

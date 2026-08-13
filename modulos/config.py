@@ -58,10 +58,30 @@ class Config:
     arquivo_calibracao: Path | None = None
 
     # ------------------------------------------------------------------
+    # Fonte das imagens
+    # ------------------------------------------------------------------
+    fonte_frames: str = "auto"
+    """De onde vêm os frames: ``"frames"``, ``"video"`` ou ``"auto"``.
+
+    Os frames exportados são a fonte **principal**: os `.mp4` brutos passam de
+    400 MB, ficam fora do Git e só existem na máquina de quem gravou, então um
+    clone do repositório não conseguia rodar nada. Uma pasta de frames
+    versionada resolve isso — e como ``info.json`` guarda fps e contagem total
+    do vídeo original, a sincronização com o GPX continua exata.
+
+    ``"auto"`` usa os frames quando a pasta existe e cai no `.mp4` quando não.
+    Use ``"video"`` para alcançar um frame que ainda não foi exportado.
+    """
+
+    # ------------------------------------------------------------------
     # Sincronização GPS <-> vídeo
     # ------------------------------------------------------------------
     frame_alvo: int = 692
-    """Índice do frame do vídeo a ser processado."""
+    """Índice do frame a ser processado, contado no vídeo original.
+
+    Continua sendo o índice no `.mp4` mesmo quando a fonte são os frames
+    exportados — é ele que amarra a imagem ao instante do GPX.
+    """
 
     offset_sync_s: float | None = None
     """Deslocamento temporal (s) entre o relógio do GPX e o t=0 do vídeo.
@@ -202,25 +222,58 @@ class Config:
         return self.raiz / "data" / f"{self.nome_percurso}.gpx"
 
     @property
+    def dir_frames(self) -> Path:
+        """Pasta dos frames exportados — a fonte principal de imagens."""
+        return self.raiz / "data" / "frames" / self.nome_percurso
+
+    @property
     def video(self) -> Path:
+        """`.mp4` bruto. Não versionado: só existe para exportar frames novos."""
         return self.raiz / "data" / f"{self.nome_percurso}.mp4"
 
+    def abrir_fonte(self):
+        """Devolve a fonte de imagens já resolvida (``video.Fonte``)."""
+        from . import video
+
+        return video.abrir(self.dir_frames, self.video, self.fonte_frames)
+
+    def frames_exportados(self) -> list[int]:
+        from . import video
+
+        return video.frames_disponiveis(self.dir_frames)
+
     def checar_arquivos(self) -> dict[str, bool]:
-        """Verifica a existência dos insumos. Útil como primeira célula."""
+        """Verifica a existência dos insumos. Útil como primeira célula.
+
+        ``video`` fica de fora: com os frames exportados o `.mp4` deixou de
+        ser insumo obrigatório, e listá-lo como ausente assustava sem motivo
+        quem tinha clonado o repositório.
+        """
+        from . import video as _video
+
         itens = {
             "gpx": self.gpx,
-            "video": self.video,
+            "frames": self.dir_frames / _video.NOME_METADADOS,
             "calibracao": self.arquivo_calibracao,
             "pesos_yolop": self.pesos_yolop,
             "repo_yolop": self.repo_yolop,
         }
-        return {k: Path(v).exists() for k, v in itens.items()}
+        estado = {k: Path(v).exists() for k, v in itens.items()}
+        estado["video (opcional)"] = self.video.exists()
+        return estado
 
     def resumo(self) -> str:
         linhas = [
             "Configuração do experimento",
             f"  percurso ............ {self.nome_percurso}",
-            f"  frame alvo .......... {self.frame_alvo}",
+            f"  fonte de imagens .... {self.fonte_frames}"
+            + (
+                f"  ({len(exportados)} frames exportados)"
+                if (exportados := self.frames_exportados())
+                else "  (nenhum frame exportado)"
+            ),
+            f"  frame alvo .......... {self.frame_alvo}"
+            + ("" if self.frame_alvo in exportados else "  (NÃO exportado)"),
             f"  offset de sync ...... {self.offset_sync_s:+.2f} s"
             + ("  (calibrado)" if self.nome_percurso in OFFSETS_CALIBRADOS else "  (NÃO calibrado)"),
             f"  horizonte ........... {self.horizonte_s:.1f} s / {self.distancia_max_m:.0f} m",

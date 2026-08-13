@@ -206,7 +206,10 @@ class Config:
         if self.saida is None:
             self.saida = self.raiz / "output" / self.nome_percurso
         if self.pesos_yolop is None:
-            self.pesos_yolop = self.raiz / "YOLOPv2" / "data" / "weights" / "yolopv2.pt"
+            # Fora do submódulo de propósito: dentro de YOLOPv2/ os 156 MB de
+            # pesos seriam apagados por um `git submodule update --force` ou
+            # por qualquer reclone do submódulo.
+            self.pesos_yolop = self.raiz / "pesos" / "yolopv2.pt"
         if self.repo_yolop is None:
             self.repo_yolop = self.raiz / "YOLOPv2"
         if self.arquivo_calibracao is None:

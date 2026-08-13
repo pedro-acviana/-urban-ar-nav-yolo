@@ -7,7 +7,7 @@ data/*.mp4
 data/*.mov
 data/*.MOV
 data/*.kmz
-YOLOPv2/data/weights/*.pt
+pesos/*.pt
 camera_calibration/imagens_calibracao/
 *.pt
 *.pth

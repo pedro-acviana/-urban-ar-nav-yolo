@@ -76,9 +76,12 @@ git submodule update --init YOLOPv2
 Falta só baixar os pesos, e o pipeline roda:
 
 ```bash
-curl -L -o YOLOPv2/data/weights/yolopv2.pt \
+curl -L -o pesos/yolopv2.pt \
   https://github.com/CAIC-AD/YOLOPv2/releases/download/V0.0.1/yolopv2.pt
 ```
+
+Eles ficam em `pesos/`, e não dentro de `YOLOPv2/`: no caminho do submódulo,
+os 156 MB desapareceriam no primeiro `git submodule update --force`.
 
 ### O que vem no repositório, e o que não vem
 
@@ -90,7 +93,7 @@ Fica de fora, por tamanho:
 
 | Arquivo | Precisa? | Como obter |
 |---|---|---|
-| `YOLOPv2/data/weights/yolopv2.pt` | **sim** | [release oficial](https://github.com/CAIC-AD/YOLOPv2/releases/download/V0.0.1/yolopv2.pt) (~156 MB) |
+| `pesos/yolopv2.pt` | **sim** | [release oficial](https://github.com/CAIC-AD/YOLOPv2/releases/download/V0.0.1/yolopv2.pt) (~156 MB) |
 | `data/*.mp4` | só para exportar frames novos | vídeos gravados em campo, ~400 MB cada |
 | `camera_calibration/imagens_calibracao/` | só para recalibrar | fotos do tabuleiro de xadrez |
 
@@ -182,6 +185,7 @@ data/             .gpx e .kml versionados; .mp4 ignorados
   frames/<percurso>/   PNGs + info.json — a fonte de imagens, versionada
 scripts/          exportar_frames.py, destravar_git.sh
 camera_calibration/  calibracao_camera.json + script de calibração
+pesos/            yolopv2.pt (ignorado) — fora do submódulo de propósito
 output/           resultados do pipeline (ignorado)
 YOLOPv2/          submódulo — segmentação de via
 ```
